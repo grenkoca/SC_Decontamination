@@ -20,9 +20,8 @@ wildcard_constraints:
    sample="|".join(samples)
 
 # Added by Caleb (02-02-2023)
-INPUT_PATH_FORMAT = "/gpfs/gsfs9/users/Collinslab/singlecell/SC_decontamination/data/{{sample}}/outs/raw_feature_bc_matrix/{data_file}"
-
-INPUT_DIR_BASE = "/gpfs/gsfs9/users/Collinslab/singlecell/SC_decontamination/data/{sample}/outs/"
+INPUT_PATH_FORMAT = config["input_pat_format"]
+INPUT_DIR_BASE    = config["input_dir_base"]
 INPUT_RAW      = Path(INPUT_DIR_BASE) / "raw_feature_bc_matrix"
 INPUT_FILTERED = Path(INPUT_DIR_BASE) / "filtered_feature_bc_matrix"
 
@@ -35,9 +34,9 @@ INPUT_FEATURES = Path(INPUT_PATH_FORMAT.format(data_file = 'features.tsv.gz'))
 rule all:
     input:
         #~~~~~~~~ seurat_round3
-        _results("plots/.done"),
-        _results("beta_GCG.png"),
-        _results("delta_INS.png")
+        _results("cleaned/{sample}/outs/raw_feature_bc_matrix/barcodes.tsv.gz"),
+        _results("cleaned/{sample}/outs/raw_feature_bc_matrix/features.tsv.gz"),
+        _results("cleaned/{sample}/outs/raw_feature_bc_matrix/matrix.mtx.gz")
 
 
 rule prep_droplets:
@@ -95,7 +94,7 @@ rule decontx_prelim:
     params:
         sample = lambda wildcards: wildcards.sample,
         outdir = lambda wildcards: _results(f"decontx_prelim/{wildcards.sample}"),
-        max_contamination = 0.1,
+        max_contamination = config["max_contamination"],
         delta_first = 10,
         delta_second = 30
     shell:
@@ -144,7 +143,7 @@ rule decontx_round2:
     params:
         sample = lambda wildcards: wildcards.sample,
         outdir = lambda wildcards: _results(f"decontx_round2/{wildcards.sample}"),
-        max_contamination = 0.1,
+        max_contamination = config["max_contamination"],
         delta_first = 10,
         delta_second = 30
     shell:
@@ -210,113 +209,5 @@ checkpoint dump_seurat_object:
             " {params.outdir}/features.tsv.gz"
             " {input.old}"
             " {params.outdir}/features.tsv.gz; "
-
-
-rule check_results:
-    input:
-        adata = _results("seurat_round3_prepped/clustered.h5ad"),
-        beta_barcodes = "data/beta_barcodes.tsv",
-        delta_barcodes = "data/delta_barcodes.tsv"
-    output:
-        gcg = _results("beta_GCG.png"),
-        ins = _results("delta_INS.png")
-    shell:
-        "{config[python_binary]} workflow/scripts/check_data.py"
-            " --h5ad {input.adata}"
-            " --barcodes {input.delta_barcodes}"
-            " --gene INS"
-            " --output {output.ins}; "
-        "{config[python_binary]} workflow/scripts/check_data.py"
-            " --h5ad {input.adata}"
-            " --barcodes {input.beta_barcodes}"
-            " --gene GCG"
-            " --output {output.gcg}"
-
-
-rule combine_and_integrate:
-    input:
-        directories = expand(_results("cleaned/{sample}/outs/raw_feature_bc_matrix"), sample=config["samples"]),
-    output:
-        manifest = _results("seurat_round3_prepped/manifest.tsv"),
-        integrated = _results("seurat_round3_prepped/integrated_isolation_forest.h5ad"),
-        pca_adata = _results("seurat_round3_prepped/pcs-normalized_pca.h5ad"),
-        harmony_complete = _results("seurat_round3_prepped/harmony.tsv.gz")
-    params:
-        sample_ids = config["samples"],
-        integrated_stem = _results("seurat_round3_prepped/integrated"),
-        pcs_stem = _results("seurat_round3_prepped/pcs"),
-        harmony_out = _results("seurat_round3_prepped/harmony"),
-    shell:
-        # Generate 10x manifest file (for merging input)
-        "{config[python_binary]} workflow/scripts/generate_tenx_manifest.py"
-            " --sample_ids {params.sample_ids}"
-            " --sample_locations {input.directories}"
-            " --output {output.manifest}; "
-        # Merge 10x data
-        "{config[python_binary]} workflow/scripts/scanpy_merge.py"
-            " --tenxdata_file {output.manifest}"
-            " --sample_metadata_file data/metadata.tsv"
-            " --sample_metadata_columns_delete 'sample_status,study,study_id'"
-            " --metadata_key experiment_id"
-            " --output_file {params.integrated_stem}; "
-        # Run isolation forest on the merged data
-        "{config[python_binary]} workflow/scripts/run_isolation_forest.py"
-            " --h5_anndata {params.integrated_stem}.h5ad"
-            " --cell_qc_column cell_passes_qc "
-            " --method IsolationForest"
-            " --outliers_fraction 0.25"
-            " --max_samples 0.1"
-            " --metadata_columns log1p_total_counts,log1p_n_genes_by_counts"
-            " --output_file {params.integrated_stem}_isolation_forest"
-            " --anndata_compression_opts 6; "
-        "{config[python_binary]} workflow/scripts/normalize_pcs.py"
-            " --h5_anndata {params.integrated_stem}_isolation_forest.h5ad"
-            " --overwrite_x_with_layer none"
-            " --output_file {params.pcs_stem}; "
-        "{config[python_binary]} workflow/scripts/estimate_pca_elbow.py"
-            " --h5_anndata {params.pcs_stem}-normalized_pca.h5ad"
-            " --output_file {params.pcs_stem}_elbow; "
-        "{config[python_binary]} workflow/scripts/harmony_process_pcs.py"
-            " --pca_file {params.pcs_stem}-pcs.tsv.gz"
-            " --metadata_file {params.pcs_stem}-metadata.tsv.gz"
-            " --metadata_column experiment_id"
-            " --theta 1.0"
-            " --n_pcs $(cat {params.pcs_stem}_elbow-auto_elbow_estimate.tsv)"
-            " --out_file {params.harmony_out}; "
-
-# Cluster based on output of Harmony
-rule final_clustering:
-    input:
-        adata = _results("seurat_round3_prepped/pcs-normalized_pca.h5ad"),
-        harmony = _results("seurat_round3_prepped/harmony.tsv.gz"),
-    output:
-        adata = _results("seurat_round3_prepped/clustered.h5ad")
-    params:
-        output_stem = _results("seurat_round3_prepped/clustered"),
-        outdir  = _results("seurat_round3")
-    shell:
-        "{config[python_binary]} workflow/scripts/scanpy_cluster.py"
-             " --h5_anndata {input.adata}"
-             " --tsv_pcs {input.harmony}"
-             " --number_neighbors 100"
-             " --cluster_method leiden"
-             " --resolution 0.5"
-             " --output_file {params.output_stem}; "
-
-
-rule plot_results:
-    input:
-        adata = _results("seurat_round3_prepped/clustered.h5ad")
-    output:
-        _results("plots/.done") # I'm not dealing with the weird scanpy plotting dirs
-    params:
-        outdir = _results("plots")
-    shell:
-        "mkdir -p {params.outdir}; "
-        "{config[python_binary]} workflow/scripts/plot_known_markers.py"
-            " --h5_anndata {input.adata}"
-            " --markers_database data/data-marker_genes.tsv"
-            " --output_file {params.outdir}/collins_islets; "
-        "touch {output}; "
 
 

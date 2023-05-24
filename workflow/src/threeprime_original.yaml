@@ -1,0 +1,55 @@
+name: "original-new-clustering"
+Rscript_binary: "/data/Collinslab/software/conda/envs/my_snakemake/bin/Rscript"
+python_binary: "/data/Collinslab/software/conda/envs/my_snakemake/bin/python"
+
+input_dir_base:    "/gpfs/gsfs9/users/Collinslab/singlecell/SC_decontamination/data/{sample}/outs/" 
+input_path_format: "/gpfs/gsfs9/users/Collinslab/singlecell/SC_decontamination/data/{{sample}}/outs/raw_feature_bc_matrix/{data_file}"
+
+max_contamination: 0.1
+
+samples:
+  - E12-01
+  - E12-02
+  - E12-03
+  - E12-04
+  - E12-05
+  - E12-06
+  - E12-07
+  - E12-08
+  - E12-09
+  - E12-10
+  - E12-11
+  - E12-12
+  - E12-13
+  - E12-14
+  - E12-15
+  - E12-16
+  - E12-17
+  - E12-18
+  - E12-19
+  - E12-20
+  - E12-21
+  - E12-22
+  - E7-01
+  - E7-02
+  - E7-03
+  - E7-04
+  - E7-05
+  - E7-06
+  - E7-07
+  - E7-08
+  - E7-09
+  - E7-10
+  - E7-11
+  - E7-12
+  - E7-13
+  - E7-14
+  - E7-15
+  - E7-16
+  - E7-17
+  - E7-18
+  - E7-19
+  - E7-20
+  - E7-21
+  - E7-22
+
